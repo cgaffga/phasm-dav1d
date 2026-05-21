@@ -75,6 +75,31 @@ enum Dav1dDecodeFrameType {
     DAV1D_DECODEFRAMETYPE_KEY   = 3, ///< decode and return keyframes only
 };
 
+/* phasm-stego (W3.D.2): per-channel emission tag constants. Values
+ * must match phasm-rav1e's PHASM_TAG_* constants in src/ec.rs so that
+ * encoder + decoder agree on channel identity. See
+ * phasm-av1/docs/design/video/av1/dav1d-hook-sites.md § 2.
+ */
+#define DAV1D_PHASM_TAG_OTHER            0
+#define DAV1D_PHASM_TAG_AC_COEFF_SIGN    1
+#define DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB  2
+
+/* phasm-stego (W3.D.2): per-decoded-bit hook + per-tag-change hook.
+ * Both default to NULL (no hooks active) — zero-initialised
+ * Dav1dPhasmHooks gives byte-identical decode behaviour to upstream
+ * dav1d. The cookie pointer is passed back to the callbacks unchanged
+ * and is typically a pointer to phasm-core's per-context recorder
+ * state.
+ */
+typedef void (*Dav1dPhasmBitHook)(void *cookie, unsigned bit, uint8_t tag);
+typedef void (*Dav1dPhasmTagHook)(void *cookie, uint8_t tag);
+
+typedef struct Dav1dPhasmHooks {
+    void *cookie;                  ///< opaque user data passed to all hooks
+    Dav1dPhasmBitHook bit_hook;    ///< fires per 50/50 binary symbol decode
+    Dav1dPhasmTagHook tag_hook;    ///< optional — fires on tag changes
+} Dav1dPhasmHooks;
+
 typedef struct Dav1dSettings {
     int n_threads; ///< number of threads (0 = number of logical cores in host system, default 0)
     int max_frame_delay; ///< Set to 1 for low-latency decoding (0 = ceil(sqrt(n_threads)), default 0)
@@ -96,6 +121,11 @@ typedef struct Dav1dSettings {
     enum Dav1dDecodeFrameType decode_frame_type; ///< frame types to decode (default
                                                  ///< DAV1D_DECODEFRAMETYPE_ALL)
     uint8_t reserved[16]; ///< reserved for future use
+    Dav1dPhasmHooks phasm_hooks; ///< phasm-stego (W3.D.2): per-bit + per-tag-change hooks.
+                                 ///< Zero-init = no hooks = byte-identical to upstream dav1d.
+                                 ///< Settings hooks are copied into Dav1dContext at dav1d_open,
+                                 ///< then propagated through Dav1dFrameContext → MsacContext per
+                                 ///< dav1d-hook-sites.md § 5.
 } Dav1dSettings;
 
 /**

@@ -108,7 +108,23 @@ unsigned dav1d_msac_decode_bool_equi_c(MsacContext *const s) {
     dif -= ret * vw;
     v += ret * (r - 2 * v);
     ctx_norm(s, dif, v);
-    return !ret;
+    const unsigned out = !ret;
+    /* phasm-stego (W3.D.2): fire the per-bit extraction hook with the
+     * decoded bit value + current tag. Hook is a no-op when
+     * phasm_hooks.bit_hook == NULL (i.e. stego not active). See
+     * phasm-av1/docs/design/video/av1/dav1d-hook-sites.md § 2.1.
+     *
+     * Note: this fires for ALL 50/50 binary symbol decodes including
+     * frame-header bits (delta_lf signs, etc.), the AC coefficient
+     * sign loop in recon_tmpl.c, and read_golomb's internal bool_equi
+     * calls. Tag distinguishes channels (AcCoeffSign vs GolombTailLsb
+     * vs Other) per channel-design.md § 4.
+     */
+    if (s->phasm_hooks.bit_hook) {
+        s->phasm_hooks.bit_hook(s->phasm_hooks.cookie, out,
+                                s->phasm_current_tag);
+    }
+    return out;
 }
 
 /* Decode a single binary value.
@@ -200,6 +216,24 @@ unsigned dav1d_msac_decode_hi_tok_c(MsacContext *const s, uint16_t *const cdf) {
     return tok;
 }
 #endif
+
+/* phasm-stego (W3.D.2): set the per-channel emission tag on the
+ * MsacContext. Sticky state — subsequent dav1d_msac_decode_bool_equi
+ * calls record this tag until reset. Mirror of phasm-rav1e's
+ * phasm_set_tag on the encoder side. Also fires the optional
+ * tag_hook callback for phasm-core bookkeeping.
+ *
+ * Defined OUTSIDE the HAVE_ASM-gated block above (lines 76-231) so
+ * it's compiled in on all platforms — the ARM-ASM build path
+ * compiles out the C decoder variants but the tag-setter must remain
+ * callable from recon_tmpl.c on every architecture.
+ */
+void dav1d_msac_phasm_set_tag(MsacContext *const s, const uint8_t tag) {
+    s->phasm_current_tag = tag;
+    if (s->phasm_hooks.tag_hook) {
+        s->phasm_hooks.tag_hook(s->phasm_hooks.cookie, tag);
+    }
+}
 
 void dav1d_msac_init(MsacContext *const s, const uint8_t *const data,
                      const size_t sz, const int disable_cdf_update_flag)

@@ -32,6 +32,7 @@
 #include <stdlib.h>
 
 #include "common/intops.h"
+#include "dav1d/dav1d.h"  /* phasm-stego (W3.D.2): Dav1dPhasmHooks type */
 
 typedef size_t ec_win;
 
@@ -46,6 +47,14 @@ typedef struct MsacContext {
 #if ARCH_X86_64 && HAVE_ASM
     unsigned (*symbol_adapt16)(struct MsacContext *s, uint16_t *cdf, size_t n_symbols);
 #endif
+
+    /* phasm-stego (W3.D.2): per-decode hook + sticky tag state.
+     * Propagated from Dav1dSettings → Dav1dContext → Dav1dFrameContext
+     * → here at tile init. Default (zero-init) = no hooks active =
+     * byte-identical to upstream dav1d. See dav1d-hook-sites.md § 5.
+     */
+    Dav1dPhasmHooks phasm_hooks;
+    uint8_t phasm_current_tag;
 } MsacContext;
 
 #if HAVE_ASM
@@ -67,6 +76,13 @@ unsigned dav1d_msac_decode_bool_equi_c(MsacContext *s);
 unsigned dav1d_msac_decode_bool_c(MsacContext *s, unsigned f);
 unsigned dav1d_msac_decode_hi_tok_c(MsacContext *s, uint16_t *cdf);
 int dav1d_msac_decode_subexp(MsacContext *s, int ref, int n, unsigned k);
+
+/* phasm-stego (W3.D.2): set the per-channel emission tag on the
+ * MsacContext. Sticky — subsequent decode_bool_equi calls record
+ * this tag. Mirror of phasm-rav1e's phasm_set_tag. See
+ * phasm-av1/docs/design/video/av1/dav1d-hook-sites.md § 2.2.
+ */
+void dav1d_msac_phasm_set_tag(MsacContext *s, uint8_t tag);
 
 /* Supported n_symbols ranges: adapt4: 1-3, adapt8: 1-7, adapt16: 3-15 */
 #ifndef dav1d_msac_decode_symbol_adapt4
