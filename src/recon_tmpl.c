@@ -655,7 +655,15 @@ static int decode_coefs(Dav1dTaskContext *const t,
              * the W3.10.4 GOLOMB tag attribution gap (encoder tagged
              * DC golomb bits but decoder didn't — 2655 mismatches
              * pre-fix). Reset to OTHER after.
+             *
+             * Phase B.2.2 (2026-05-21): also set meta with
+             * scan_pos = 0 (DC is c == 0). Without this, golomb
+             * positions inherit STALE meta from a previous block's
+             * last AC emission, breaking the cost compute on the
+             * joint Tier 1 cover vector.
              */
+            phasm_meta_base.scan_pos = 0;
+            dav1d_msac_phasm_set_meta(&ts->msac, &phasm_meta_base);
             dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
             dc_tok = read_golomb(&ts->msac) + 15;
             dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
@@ -736,7 +744,12 @@ static int decode_coefs(Dav1dTaskContext *const t,
             /* phasm-stego (W3.10.4-fix): DC golomb tail tag for the
              * no-qmatrix path — sibling of the qmatrix DC golomb
              * site above at line :623.
+             *
+             * Phase B.2.2 (2026-05-21): set meta with scan_pos = 0
+             * (mirror of the qmatrix branch above).
              */
+            phasm_meta_base.scan_pos = 0;
+            dav1d_msac_phasm_set_meta(&ts->msac, &phasm_meta_base);
             dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
             dc_tok = read_golomb(&ts->msac) + 15;
             dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
