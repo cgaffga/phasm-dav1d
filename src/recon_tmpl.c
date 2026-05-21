@@ -620,7 +620,15 @@ static int decode_coefs(Dav1dTaskContext *const t,
         dc_dq = (dc_dq * qm_tbl[0] + 16) >> 5;
 
         if (dc_tok == 15) {
+            /* phasm-stego (W3.10.4-fix): DC golomb tail tag. Mirror
+             * of the AC golomb tag site below at line :650. Closes
+             * the W3.10.4 GOLOMB tag attribution gap (encoder tagged
+             * DC golomb bits but decoder didn't — 2655 mismatches
+             * pre-fix). Reset to OTHER after.
+             */
+            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
             dc_tok = read_golomb(&ts->msac) + 15;
+            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
             if (dbg)
                 printf("Post-dc_residual[%d->%d]: r=%d\n",
                        dc_tok - 15, dc_tok, ts->msac.rng);
@@ -690,7 +698,13 @@ static int decode_coefs(Dav1dTaskContext *const t,
     } else {
         // non-qmatrix is the common case and allows for additional optimizations
         if (dc_tok == 15) {
+            /* phasm-stego (W3.10.4-fix): DC golomb tail tag for the
+             * no-qmatrix path — sibling of the qmatrix DC golomb
+             * site above at line :623.
+             */
+            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
             dc_tok = read_golomb(&ts->msac) + 15;
+            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
             if (dbg)
                 printf("Post-dc_residual[%d->%d]: r=%d\n",
                        dc_tok - 15, dc_tok, ts->msac.rng);
