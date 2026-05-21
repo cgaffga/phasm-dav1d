@@ -2455,6 +2455,16 @@ static void setup_tile(Dav1dTileState *const ts,
 
     dav1d_msac_init(&ts->msac, data, sz, f->frame_hdr->disable_cdf_update);
 
+    /* phasm-stego (W3.D.2.4): propagate hooks from Dav1dContext into
+     * this tile's MsacContext. Reset phasm_current_tag to OTHER so
+     * the new tile starts in a known state (don't leak the previous
+     * tile's tag setting). dav1d_msac_init doesn't touch phasm fields
+     * by design (caller controls hook lifecycle). See
+     * dav1d-hook-sites.md § 5.
+     */
+    ts->msac.phasm_hooks = f->c->phasm_hooks;
+    ts->msac.phasm_current_tag = DAV1D_PHASM_TAG_OTHER;
+
     ts->tiling.row = tile_row;
     ts->tiling.col = tile_col;
     ts->tiling.col_start = col_sb_start << sb_shift;

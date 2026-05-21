@@ -197,6 +197,14 @@ struct Dav1dContext {
 
     Dav1dLogger logger;
 
+    /* phasm-stego (W3.D.2.4): per-context bit + tag hooks. Copied
+     * from Dav1dSettings at dav1d_open. Propagated to each
+     * Dav1dFrameContext at frame allocation, then to each
+     * MsacContext at tile init. See
+     * phasm-av1/docs/design/video/av1/dav1d-hook-sites.md § 5.
+     */
+    Dav1dPhasmHooks phasm_hooks;
+
     Dav1dMemPool *picture_pool;
     Dav1dMemPool *pic_ctx_pool;
 };

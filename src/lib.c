@@ -168,6 +168,12 @@ COLD int dav1d_open(Dav1dContext **const c_out, const Dav1dSettings *const s) {
 
     c->allocator = s->allocator;
     c->logger = s->logger;
+    /* phasm-stego (W3.D.2.4): copy hooks from user-supplied settings.
+     * Zero-init = NULL callbacks = byte-identical decode behaviour to
+     * upstream dav1d. Hooks are propagated to MsacContext per tile in
+     * src/decode.c::setup_tile. See dav1d-hook-sites.md § 5.
+     */
+    c->phasm_hooks = s->phasm_hooks;
     c->apply_grain = s->apply_grain;
     c->operating_point = s->operating_point;
     c->all_layers = s->all_layers;
