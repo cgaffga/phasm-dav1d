@@ -56,6 +56,52 @@ static inline unsigned read_golomb(MsacContext *const msac) {
     return val - 1;
 }
 
+/* phasm-stego (B.2.3.proper): variant of read_golomb that tags ONLY
+ * the literal LSB bit as GOLOMB_TAIL_LSB. Leading zeros + non-LSB
+ * literals get OTHER. Mirror of phasm-rav1e's inline tag dance in
+ * write_coeffs_lv_map (vendor/phasm-rav1e/src/context/block_unit.rs).
+ *
+ * Why: channel-design.md § 4.2 says only the LSB of golomb_data_bit
+ * is safe to flip — it's the only bit whose flip perturbs |level| by
+ * exactly ±1 without changing the code length or cascading through
+ * culLevel + downstream CDF contexts. The original v0.3 tag wraps
+ * around plain read_golomb tagged ALL its bits (leading zeros +
+ * literals), which broke joint Tier 1 STC extract in B.2.3.
+ *
+ * If meta is non-NULL, it's installed via phasm_set_meta before the
+ * LSB bit is read (so the cost function knows the (plane / pixel /
+ * TX shape / scan_pos) for this enrolled position).
+ */
+static inline unsigned read_golomb_lsb_tagged(
+    MsacContext *const msac,
+    const Dav1dPhasmAcSignMeta *const meta)
+{
+    int len = 0;
+    unsigned val = 1;
+
+    /* Leading zeros — tag OTHER. */
+    dav1d_msac_phasm_set_tag(msac, DAV1D_PHASM_TAG_OTHER);
+    while (!dav1d_msac_decode_bool_equi(msac) && len < 32) len++;
+
+    /* Non-LSB literal bits (MSB-first, all but the last) — OTHER. */
+    while (len > 1) {
+        val = (val << 1) + dav1d_msac_decode_bool_equi(msac);
+        len--;
+    }
+
+    /* LSB literal bit — tag GOLOMB_TAIL_LSB if there is one. */
+    if (len > 0) {
+        if (meta) {
+            dav1d_msac_phasm_set_meta(msac, meta);
+        }
+        dav1d_msac_phasm_set_tag(msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
+        val = (val << 1) + dav1d_msac_decode_bool_equi(msac);
+        dav1d_msac_phasm_set_tag(msac, DAV1D_PHASM_TAG_OTHER);
+    }
+
+    return val - 1;
+}
+
 static inline unsigned get_skip_ctx(const TxfmInfo *const t_dim,
                                     const enum BlockSize bs,
                                     const uint8_t *const a,
@@ -650,23 +696,14 @@ static int decode_coefs(Dav1dTaskContext *const t,
         dc_dq = (dc_dq * qm_tbl[0] + 16) >> 5;
 
         if (dc_tok == 15) {
-            /* phasm-stego (W3.10.4-fix): DC golomb tail tag. Mirror
-             * of the AC golomb tag site below at line :650. Closes
-             * the W3.10.4 GOLOMB tag attribution gap (encoder tagged
-             * DC golomb bits but decoder didn't — 2655 mismatches
-             * pre-fix). Reset to OTHER after.
-             *
-             * Phase B.2.2 (2026-05-21): also set meta with
-             * scan_pos = 0 (DC is c == 0). Without this, golomb
-             * positions inherit STALE meta from a previous block's
-             * last AC emission, breaking the cost compute on the
-             * joint Tier 1 cover vector.
+            /* phasm-stego (B.2.3.proper, 2026-05-21): tag only the
+             * literal LSB of the golomb code as GOLOMB_TAIL_LSB,
+             * with scan_pos = 0 (DC). Leading zeros + non-LSB
+             * literals get OTHER. See read_golomb_lsb_tagged
+             * (recon_tmpl.c:49) for rationale.
              */
             phasm_meta_base.scan_pos = 0;
-            dav1d_msac_phasm_set_meta(&ts->msac, &phasm_meta_base);
-            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
-            dc_tok = read_golomb(&ts->msac) + 15;
-            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
+            dc_tok = read_golomb_lsb_tagged(&ts->msac, &phasm_meta_base) + 15;
             if (dbg)
                 printf("Post-dc_residual[%d->%d]: r=%d\n",
                        dc_tok - 15, dc_tok, ts->msac.rng);
@@ -708,17 +745,13 @@ static int decode_coefs(Dav1dTaskContext *const t,
                 int dq_sat;
 
                 if (rc_tok >= (15 << 11)) {
-                    /* phasm-stego (W3.D.3): tag the golomb tail bits
-                     * as GolombTailLsb per channel-design.md § 4.2.
-                     * read_golomb is bool_equi-composed, so all its
-                     * internal calls inherit the tag automatically
-                     * via the sticky state. Reset to OTHER after.
-                     * Mirror of phasm-rav1e encode_coeff_signs at
-                     * src/context/block_unit.rs:2004.
+                    /* phasm-stego (B.2.3.proper, 2026-05-21): tag
+                     * only the literal LSB of the golomb code as
+                     * GOLOMB_TAIL_LSB. AC scan_pos = rc, already
+                     * stored in phasm_meta_base by the AC sign
+                     * block above (line :691).
                      */
-                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
-                    tok = read_golomb(&ts->msac) + 15;
-                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
+                    tok = read_golomb_lsb_tagged(&ts->msac, &phasm_meta_base) + 15;
                     if (dbg)
                         printf("Post-residual[%d=%d->%d]: r=%d\n",
                                rc, tok - 15, tok, ts->msac.rng);
@@ -741,18 +774,11 @@ static int decode_coefs(Dav1dTaskContext *const t,
     } else {
         // non-qmatrix is the common case and allows for additional optimizations
         if (dc_tok == 15) {
-            /* phasm-stego (W3.10.4-fix): DC golomb tail tag for the
-             * no-qmatrix path — sibling of the qmatrix DC golomb
-             * site above at line :623.
-             *
-             * Phase B.2.2 (2026-05-21): set meta with scan_pos = 0
-             * (mirror of the qmatrix branch above).
+            /* phasm-stego (B.2.3.proper, 2026-05-21): tag-LSB-only
+             * sibling of the qmatrix DC golomb site above (line :653).
              */
             phasm_meta_base.scan_pos = 0;
-            dav1d_msac_phasm_set_meta(&ts->msac, &phasm_meta_base);
-            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
-            dc_tok = read_golomb(&ts->msac) + 15;
-            dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
+            dc_tok = read_golomb_lsb_tagged(&ts->msac, &phasm_meta_base) + 15;
             if (dbg)
                 printf("Post-dc_residual[%d->%d]: r=%d\n",
                        dc_tok - 15, dc_tok, ts->msac.rng);
@@ -791,13 +817,12 @@ static int decode_coefs(Dav1dTaskContext *const t,
 
                 // residual
                 if (rc_tok >= (15 << 11)) {
-                    /* phasm-stego (W3.D.3): GolombTailLsb tag for
-                     * the no-qmatrix path golomb residual. Sibling
-                     * to recon_tmpl.c:650 (qmatrix path).
+                    /* phasm-stego (B.2.3.proper, 2026-05-21): tag-LSB-
+                     * only sibling of the qmatrix AC golomb site above
+                     * (line :712). AC scan_pos = rc, set just above
+                     * in phasm_meta_base by the AC sign block.
                      */
-                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
-                    tok = read_golomb(&ts->msac) + 15;
-                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
+                    tok = read_golomb_lsb_tagged(&ts->msac, &phasm_meta_base) + 15;
                     if (dbg)
                         printf("Post-residual[%d=%d->%d]: r=%d\n",
                                rc, tok - 15, tok, ts->msac.rng);
