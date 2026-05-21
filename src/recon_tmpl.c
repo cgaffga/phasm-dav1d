@@ -639,7 +639,17 @@ static int decode_coefs(Dav1dTaskContext *const t,
         if (rc) ac_qm: {
             const unsigned ac_dq = dq_tbl[1];
             do {
+                /* phasm-stego (W3.D.3): tag this 50/50 emission as
+                 * AcCoeffSign per channel-design.md § 4.1. Mirror of
+                 * phasm-rav1e's encode_coeff_signs at
+                 * src/context/block_unit.rs:2000. Tag reset to OTHER
+                 * after the decode so subsequent 50/50 reads (header
+                 * deltas, etc.) default to Other. See
+                 * dav1d-hook-sites.md § 3.1.
+                 */
+                dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_AC_COEFF_SIGN);
                 const int sign = dav1d_msac_decode_bool_equi(&ts->msac);
+                dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
                 if (dbg)
                     printf("Post-sign[%d=%d]: r=%d\n", rc, sign, ts->msac.rng);
                 const unsigned rc_tok = cf[rc];
@@ -647,7 +657,17 @@ static int decode_coefs(Dav1dTaskContext *const t,
                 int dq_sat;
 
                 if (rc_tok >= (15 << 11)) {
+                    /* phasm-stego (W3.D.3): tag the golomb tail bits
+                     * as GolombTailLsb per channel-design.md § 4.2.
+                     * read_golomb is bool_equi-composed, so all its
+                     * internal calls inherit the tag automatically
+                     * via the sticky state. Reset to OTHER after.
+                     * Mirror of phasm-rav1e encode_coeff_signs at
+                     * src/context/block_unit.rs:2004.
+                     */
+                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
                     tok = read_golomb(&ts->msac) + 15;
+                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
                     if (dbg)
                         printf("Post-residual[%d=%d->%d]: r=%d\n",
                                rc, tok - 15, tok, ts->msac.rng);
@@ -688,7 +708,14 @@ static int decode_coefs(Dav1dTaskContext *const t,
         if (rc) ac_noqm: {
             const unsigned ac_dq = dq_tbl[1];
             do {
+                /* phasm-stego (W3.D.3): tag this 50/50 emission as
+                 * AcCoeffSign — sibling site to recon_tmpl.c:642
+                 * (qmatrix path). See dav1d-hook-sites.md § 3.1 +
+                 * the AC sign tag rationale above.
+                 */
+                dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_AC_COEFF_SIGN);
                 const int sign = dav1d_msac_decode_bool_equi(&ts->msac);
+                dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
                 if (dbg)
                     printf("Post-sign[%d=%d]: r=%d\n", rc, sign, ts->msac.rng);
                 const unsigned rc_tok = cf[rc];
@@ -697,7 +724,13 @@ static int decode_coefs(Dav1dTaskContext *const t,
 
                 // residual
                 if (rc_tok >= (15 << 11)) {
+                    /* phasm-stego (W3.D.3): GolombTailLsb tag for
+                     * the no-qmatrix path golomb residual. Sibling
+                     * to recon_tmpl.c:650 (qmatrix path).
+                     */
+                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_GOLOMB_TAIL_LSB);
                     tok = read_golomb(&ts->msac) + 15;
+                    dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
                     if (dbg)
                         printf("Post-residual[%d=%d->%d]: r=%d\n",
                                rc, tok - 15, tok, ts->msac.rng);
