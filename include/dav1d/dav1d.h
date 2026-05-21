@@ -94,10 +94,37 @@ enum Dav1dDecodeFrameType {
 typedef void (*Dav1dPhasmBitHook)(void *cookie, unsigned bit, uint8_t tag);
 typedef void (*Dav1dPhasmTagHook)(void *cookie, uint8_t tag);
 
+/* phasm-stego (Phase B.1.1.b, 2026-05-21): per-AC-sign-emission
+ * spatial metadata. Mirror of phasm-rav1e's AcSignMeta in
+ * vendor/phasm-rav1e/src/ec.rs. Field layout must agree between
+ * encoder + decoder so cross-side strict parity holds. Other tag
+ * values (OTHER, GOLOMB_TAIL_LSB) get zero-init meta (not read by
+ * phasm-core).
+ *
+ * Pixel coords are PER-PLANE (already chroma-subsampled for
+ * plane=1/2). Frame-relative; v0.3-AV1 is single-tile so tile-
+ * relative is equivalent. See
+ * phasm-av1/docs/design/video/av1/phase-b-uniward-cascade.md § 3.
+ */
+typedef struct Dav1dPhasmAcSignMeta {
+    uint8_t plane;            ///< 0 = Y, 1 = U, 2 = V
+    uint16_t plane_px_x;      ///< top-left x in this plane's pixel buffer
+    uint16_t plane_px_y;      ///< top-left y (per-plane, chroma-subsampled)
+    uint8_t tx_width_log2;    ///< log2 of TX width in pixels (2..6)
+    uint8_t tx_height_log2;   ///< log2 of TX height in pixels (2..6)
+    uint8_t tx_type;          ///< AV1 TxType enum value (0..15)
+    uint16_t scan_pos;        ///< raster index = freq_y * tx_width + freq_x
+} Dav1dPhasmAcSignMeta;
+
+typedef void (*Dav1dPhasmMetaHook)(void *cookie,
+                                   const Dav1dPhasmAcSignMeta *meta);
+
 typedef struct Dav1dPhasmHooks {
     void *cookie;                  ///< opaque user data passed to all hooks
     Dav1dPhasmBitHook bit_hook;    ///< fires per 50/50 binary symbol decode
     Dav1dPhasmTagHook tag_hook;    ///< optional — fires on tag changes
+    Dav1dPhasmMetaHook meta_hook;  ///< Phase B.1.1.b — fires on meta change
+                                   ///< (only invoked at AC sign decode sites)
 } Dav1dPhasmHooks;
 
 typedef struct Dav1dSettings {

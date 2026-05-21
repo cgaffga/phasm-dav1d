@@ -84,6 +84,16 @@ int dav1d_msac_decode_subexp(MsacContext *s, int ref, int n, unsigned k);
  */
 void dav1d_msac_phasm_set_tag(MsacContext *s, uint8_t tag);
 
+/* phasm-stego (Phase B.1.1.b): fire the meta_hook with the supplied
+ * AcSignMeta. Called at each AC sign decode site in recon_tmpl.c
+ * immediately BEFORE the bool_equi decode that emits the sign bit.
+ * Mirror of phasm-rav1e's phasm_set_meta. No-op when the meta_hook
+ * is NULL (i.e., when phasm-core hasn't registered one).
+ * See phasm-av1/docs/design/video/av1/phase-b-uniward-cascade.md § 3.
+ */
+void dav1d_msac_phasm_set_meta(MsacContext *s,
+                               const Dav1dPhasmAcSignMeta *meta);
+
 /* Supported n_symbols ranges: adapt4: 1-3, adapt8: 1-7, adapt16: 3-15 */
 #ifndef dav1d_msac_decode_symbol_adapt4
 #define dav1d_msac_decode_symbol_adapt4  dav1d_msac_decode_symbol_adapt_c

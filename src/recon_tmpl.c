@@ -599,6 +599,36 @@ static int decode_coefs(Dav1dTaskContext *const t,
     const int cf_max = ~(~127U << (BITDEPTH == 8 ? 8 : f->cur.p.bpc));
     unsigned cul_level, dc_sign_level;
 
+    /* phasm-stego (Phase B.1.1.b): compute block-level AcSignMeta
+     * base. Both AC sign decode sites below (ac_qm + ac_noqm) reuse
+     * this, setting only scan_pos per emission. Mirror of phasm-
+     * rav1e's block_meta_base in src/context/block_unit.rs at the
+     * top of encode_coeff_signs.
+     *
+     * Pixel coords are PER-PLANE: t->bx / t->by are in luma 4-px-
+     * block units; for chroma at 4:2:0 (ss_hor = ss_ver = 1) we
+     * shift right by ss_hor / ss_ver before multiplying by 4.
+     *
+     * tx_width_log2 + tx_height_log2: TxfmInfo.lw / .lh are log2 of
+     * TX dims in 4-px blocks. Pixel-log2 = lw + 2.
+     *
+     * tx_type: *txtp is the AV1 TxType enum value, set above by
+     * either lossless / max-size / read_txtp.
+     */
+    const int phasm_ss_ver = f->cur.p.layout == DAV1D_PIXEL_LAYOUT_I420;
+    const int phasm_ss_hor = f->cur.p.layout != DAV1D_PIXEL_LAYOUT_I444;
+    Dav1dPhasmAcSignMeta phasm_meta_base = {
+        .plane = (uint8_t) plane,
+        .plane_px_x = (uint16_t)
+            ((t->bx >> (plane ? phasm_ss_hor : 0)) << 2),
+        .plane_px_y = (uint16_t)
+            ((t->by >> (plane ? phasm_ss_ver : 0)) << 2),
+        .tx_width_log2 = (uint8_t) (t_dim->lw + 2),
+        .tx_height_log2 = (uint8_t) (t_dim->lh + 2),
+        .tx_type = (uint8_t) *txtp,
+        .scan_pos = 0, /* overwritten per emission below */
+    };
+
     if (!dc_tok) {
         cul_level = 0;
         dc_sign_level = 1 << 6;
@@ -654,7 +684,12 @@ static int decode_coefs(Dav1dTaskContext *const t,
                  * after the decode so subsequent 50/50 reads (header
                  * deltas, etc.) default to Other. See
                  * dav1d-hook-sites.md § 3.1.
+                 *
+                 * Phase B.1.1.b: also fire meta_hook with current
+                 * scan_pos. Mirror of encoder phasm_set_meta call.
                  */
+                phasm_meta_base.scan_pos = (uint16_t) rc;
+                dav1d_msac_phasm_set_meta(&ts->msac, &phasm_meta_base);
                 dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_AC_COEFF_SIGN);
                 const int sign = dav1d_msac_decode_bool_equi(&ts->msac);
                 dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);
@@ -726,7 +761,12 @@ static int decode_coefs(Dav1dTaskContext *const t,
                  * AcCoeffSign — sibling site to recon_tmpl.c:642
                  * (qmatrix path). See dav1d-hook-sites.md § 3.1 +
                  * the AC sign tag rationale above.
+                 *
+                 * Phase B.1.1.b: also fire meta_hook — sibling of
+                 * the qmatrix-path meta call above.
                  */
+                phasm_meta_base.scan_pos = (uint16_t) rc;
+                dav1d_msac_phasm_set_meta(&ts->msac, &phasm_meta_base);
                 dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_AC_COEFF_SIGN);
                 const int sign = dav1d_msac_decode_bool_equi(&ts->msac);
                 dav1d_msac_phasm_set_tag(&ts->msac, DAV1D_PHASM_TAG_OTHER);

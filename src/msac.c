@@ -235,6 +235,16 @@ void dav1d_msac_phasm_set_tag(MsacContext *const s, const uint8_t tag) {
     }
 }
 
+/* phasm-stego (Phase B.1.1.b): fire meta_hook with the supplied
+ * AcSignMeta. Called immediately before the AC sign bool_equi
+ * decode in recon_tmpl.c. Mirror of phasm-rav1e's phasm_set_meta. */
+void dav1d_msac_phasm_set_meta(MsacContext *const s,
+                               const Dav1dPhasmAcSignMeta *const meta) {
+    if (s->phasm_hooks.meta_hook) {
+        s->phasm_hooks.meta_hook(s->phasm_hooks.cookie, meta);
+    }
+}
+
 void dav1d_msac_init(MsacContext *const s, const uint8_t *const data,
                      const size_t sz, const int disable_cdf_update_flag)
 {
