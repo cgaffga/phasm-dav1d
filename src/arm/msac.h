@@ -45,8 +45,37 @@ unsigned dav1d_msac_decode_bool_neon(MsacContext *s, unsigned f);
 #define dav1d_msac_decode_symbol_adapt16 dav1d_msac_decode_symbol_adapt16_neon
 #define dav1d_msac_decode_hi_tok         dav1d_msac_decode_hi_tok_neon
 #define dav1d_msac_decode_bool_adapt     dav1d_msac_decode_bool_adapt_neon
-#define dav1d_msac_decode_bool_equi      dav1d_msac_decode_bool_equi_neon
 #define dav1d_msac_decode_bool           dav1d_msac_decode_bool_neon
+
+/* phasm-stego (W3.D.2.3): NEON-path wrapper around the asm variant
+ * of dav1d_msac_decode_bool_equi. Calls the NEON asm, then fires the
+ * phasm-stego per-bit hook with the decoded value + current channel
+ * tag. NULL bit_hook = no-op = byte-identical decode timing on the
+ * hot path (single conditional branch on a likely-cached pointer).
+ *
+ * Mirror of the hook insertion in src/msac.c::dav1d_msac_decode_bool_equi_c.
+ * Required for ARM macOS / iOS / Android builds because the C variant
+ * is compiled out via #if !(HAVE_ASM && TRIM_DSP_FUNCTIONS &&
+ * ARCH_AARCH64) — NEON is the runtime decoder.
+ *
+ * The wrapper is given a distinct name + remapped via #define so
+ * src/msac.h's `#ifndef dav1d_msac_decode_bool_equi` guard sees the
+ * macro as set (otherwise it falls through to the _c default and
+ * the linker fails on ARM-asm builds where _c is compiled out).
+ *
+ * See phasm-av1/docs/design/video/av1/dav1d-hook-sites.md § 4.
+ */
+static inline unsigned phasm_dav1d_msac_decode_bool_equi_neon_wrapper(
+    MsacContext *const s)
+{
+    const unsigned out = dav1d_msac_decode_bool_equi_neon(s);
+    if (s->phasm_hooks.bit_hook) {
+        s->phasm_hooks.bit_hook(s->phasm_hooks.cookie, out,
+                                s->phasm_current_tag);
+    }
+    return out;
+}
+#define dav1d_msac_decode_bool_equi      phasm_dav1d_msac_decode_bool_equi_neon_wrapper
 #endif
 
 #endif /* DAV1D_SRC_ARM_MSAC_H */

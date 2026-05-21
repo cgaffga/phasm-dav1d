@@ -50,8 +50,31 @@ unsigned dav1d_msac_decode_hi_tok_sse2(MsacContext *s, uint16_t *cdf);
 #endif
 
 #define dav1d_msac_decode_bool_adapt     dav1d_msac_decode_bool_adapt_sse2
-#define dav1d_msac_decode_bool_equi      dav1d_msac_decode_bool_equi_sse2
 #define dav1d_msac_decode_bool           dav1d_msac_decode_bool_sse2
+
+/* phasm-stego (W3.D.2.3): SSE2-path wrapper around the asm variant
+ * of dav1d_msac_decode_bool_equi. Calls SSE2 asm + fires the per-bit
+ * hook. NULL bit_hook = no-op = byte-identical decode behaviour to
+ * upstream dav1d.
+ *
+ * Mirror of the NEON-path wrapper in src/arm/msac.h. Required for
+ * x86 / x86-64 builds where the C variant is compiled out via the
+ * msac.c HAVE_ASM gate. Wrapper has a distinct name + #define
+ * remap so src/msac.h's `#ifndef dav1d_msac_decode_bool_equi` guard
+ * sees the macro as set. See phasm-av1/docs/design/video/av1/
+ * dav1d-hook-sites.md § 4.
+ */
+static inline unsigned phasm_dav1d_msac_decode_bool_equi_sse2_wrapper(
+    MsacContext *const s)
+{
+    const unsigned out = dav1d_msac_decode_bool_equi_sse2(s);
+    if (s->phasm_hooks.bit_hook) {
+        s->phasm_hooks.bit_hook(s->phasm_hooks.cookie, out,
+                                s->phasm_current_tag);
+    }
+    return out;
+}
+#define dav1d_msac_decode_bool_equi      phasm_dav1d_msac_decode_bool_equi_sse2_wrapper
 
 #if ARCH_X86_64
 #define dav1d_msac_decode_symbol_adapt16(ctx, cdf, symb) ((ctx)->symbol_adapt16(ctx, cdf, symb))
