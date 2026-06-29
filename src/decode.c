@@ -2058,6 +2058,52 @@ static int decode_b(Dav1dTaskContext *const t,
         }
     }
 
+    /* phasm-stealth-audit (2026-06-29): block_hook fire site. Fires
+     * once per Av1Block at the end of decode_b, when all block-level
+     * fields are populated. Used by the Layer-3 fingerprint
+     * comparison binary to tally per-block metadata histograms
+     * (partition, mode, MV, ref) for stego-vs-natural divergence
+     * measurement. NULL block_hook = no-op = no per-block overhead.
+     *
+     * Field semantics in dav1d's internal Av1Block (src/levels.h):
+     *   - intra=1 → y_mode / uv_mode populated, MV/ref union is unused
+     *   - intra=0 → ref[0..1], mv[0..1], inter_mode, comp_type populated
+     *   - skip / skip_mode / seg_id always meaningful
+     */
+    if (f->c->phasm_hooks.block_hook) {
+        Dav1dPhasmBlockInfo info = {0};
+        info.bx = (uint16_t)t->bx;
+        info.by = (uint16_t)t->by;
+        info.bs = (uint8_t)b->bs;
+        info.bl = (uint8_t)bl;
+        info.bp = (uint8_t)bp;
+        info.intra = (uint8_t)b->intra;
+        info.skip = (uint8_t)b->skip;
+        info.skip_mode = (uint8_t)b->skip_mode;
+        info.seg_id = (uint8_t)b->seg_id;
+        if (b->intra) {
+            info.y_mode = (uint8_t)b->y_mode;
+            info.uv_mode = (uint8_t)b->uv_mode;
+            info.ref0 = -1;
+            info.ref1 = -1;
+        } else {
+            info.ref0 = (int8_t)b->ref[0];
+            info.ref1 = (int8_t)b->ref[1];
+            info.inter_mode = (uint8_t)b->inter_mode;
+            info.motion_mode = (uint8_t)b->motion_mode;
+            info.comp_type = (uint8_t)b->comp_type;
+            info.mv0_x = b->mv[0].x;
+            info.mv0_y = b->mv[0].y;
+            if (b->comp_type) {
+                info.mv1_x = b->mv[1].x;
+                info.mv1_y = b->mv[1].y;
+            }
+        }
+        info.frame_type = (uint8_t)f->frame_hdr->frame_type;
+        info.frame_offset = (uint16_t)f->frame_hdr->frame_offset;
+        f->c->phasm_hooks.block_hook(f->c->phasm_hooks.cookie, &info);
+    }
+
     return 0;
 }
 

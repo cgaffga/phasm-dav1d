@@ -119,12 +119,65 @@ typedef struct Dav1dPhasmAcSignMeta {
 typedef void (*Dav1dPhasmMetaHook)(void *cookie,
                                    const Dav1dPhasmAcSignMeta *meta);
 
+/* phasm-stealth-audit (2026-06-29): per-block decode metadata. Fires
+ * once per Av1Block at the end of dav1d's decode_b. Used for Layer-3
+ * fingerprint comparison (partition / mode / MV / ref distributions)
+ * between phasm stego output and rav1e CLI direct output at the same
+ * speed preset. See
+ * phasm-av1/docs/design/video/av1/stealth-audit-speed-preset-2026-06-29.md.
+ *
+ * All fields are direct mirrors of dav1d's internal Av1Block struct
+ * (src/levels.h) except `frame_offset` which comes from
+ * Dav1dFrameContext->frame_hdr. NULL block_hook = no-op = no per-block
+ * overhead.
+ *
+ * Inter / intra fields are unioned in Av1Block; we flatten both into
+ * the Info struct for simpler client-side aggregation. For intra
+ * blocks (intra=1), ref0/ref1/mv_xy/inter_mode/motion_mode/comp_type
+ * are zero-init. For inter blocks (intra=0), y_mode/uv_mode are
+ * zero-init.
+ */
+typedef struct Dav1dPhasmBlockInfo {
+    /* Position + size */
+    uint16_t bx;                 ///< block X in 4x4 units (frame-relative)
+    uint16_t by;                 ///< block Y in 4x4 units (frame-relative)
+    uint8_t bs;                  ///< BlockSize enum (0..21) — see src/levels.h
+    uint8_t bl;                  ///< BlockLevel enum (0..4)
+    uint8_t bp;                  ///< BlockPartition enum (0..9)
+    uint8_t intra;               ///< 0 = inter, 1 = intra
+    uint8_t skip;                ///< 0/1 — residual all-zero
+    uint8_t skip_mode;           ///< 0/1 — compound prediction shortcut
+    uint8_t seg_id;              ///< segment id (0..7)
+    /* Intra-mode fields (valid when intra=1; else zero-init) */
+    uint8_t y_mode;              ///< intra: IntraPredMode (0..12) — see src/levels.h
+    uint8_t uv_mode;             ///< intra: UV intra prediction mode
+    /* Inter-mode fields (valid when intra=0; else zero-init) */
+    int8_t ref0;                 ///< inter: ref frame 0 (–1 if intra)
+    int8_t ref1;                 ///< inter: ref frame 1 (–1 if not compound)
+    uint8_t inter_mode;          ///< inter: CompInterPredMode (NEARESTMV..GLOBAL_GLOBALMV)
+    uint8_t motion_mode;         ///< inter: MotionMode (TRANSLATION / OBMC / WARP)
+    uint8_t comp_type;           ///< inter: CompInterType (AVG / WEDGE / DIFFWTD / SEG)
+    int16_t mv0_x;               ///< inter: MV ref0 X (1/8 pel)
+    int16_t mv0_y;               ///< inter: MV ref0 Y (1/8 pel)
+    int16_t mv1_x;               ///< inter: MV ref1 X (compound only)
+    int16_t mv1_y;               ///< inter: MV ref1 Y (compound only)
+    /* Frame context */
+    uint8_t frame_type;          ///< Dav1dFrameType (KEY=0, INTER=1, INTRA=2, SWITCH=3)
+    uint8_t _pad0;               ///< explicit pad to align frame_offset to 4-byte
+    uint16_t frame_offset;       ///< frame counter (frame_hdr->frame_offset)
+} Dav1dPhasmBlockInfo;
+
+typedef void (*Dav1dPhasmBlockHook)(void *cookie,
+                                    const Dav1dPhasmBlockInfo *info);
+
 typedef struct Dav1dPhasmHooks {
     void *cookie;                  ///< opaque user data passed to all hooks
     Dav1dPhasmBitHook bit_hook;    ///< fires per 50/50 binary symbol decode
     Dav1dPhasmTagHook tag_hook;    ///< optional — fires on tag changes
     Dav1dPhasmMetaHook meta_hook;  ///< Phase B.1.1.b — fires on meta change
                                    ///< (only invoked at AC sign decode sites)
+    Dav1dPhasmBlockHook block_hook; ///< stealth-audit-2026-06-29 — fires per Av1Block
+                                    ///< (NULL = no-op, no overhead)
 } Dav1dPhasmHooks;
 
 typedef struct Dav1dSettings {
